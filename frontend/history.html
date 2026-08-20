@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史记录 · Dwell Time Monitor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="page" style="display:flex;flex-direction:column;min-height:100vh;">
+    <header class="history-header">
+        <div class="brand">
+            <svg class="brand-logo" viewBox="0 0 24 24" fill="none">
+                <rect x="2" y="6" width="13" height="12" rx="2.5" stroke="#4F8CFF" stroke-width="2"/>
+                <path d="M15 10.5l6-3v9l-6-3z" fill="#4F8CFF"/>
+            </svg>
+            <div class="brand-text">
+                <h1>历史记录</h1>
+                <span class="brand-sub">History Records</span>
+            </div>
+        </div>
+        <a class="nav-btn" href="index.html">← 返回看板</a>
+    </header>
+
+    <div class="history-body">
+        <!-- Toolbar -->
+        <div class="history-toolbar">
+            <div class="history-search">
+                <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="11" cy="11" r="7" stroke="#8A93A6" stroke-width="2"/>
+                    <path d="M20 20l-3.5-3.5" stroke="#8A93A6" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <input type="text" id="histSearch" placeholder="搜索对象 ID / 摄像头编号">
+            </div>
+            <div class="filter-chips" id="histChips">
+                <button class="chip active" data-filter="all">全部</button>
+                <button class="chip" data-filter="closed">已离场</button>
+                <button class="chip" data-filter="overdue">超期告警</button>
+            </div>
+        </div>
+
+        <!-- Summary stats -->
+        <div class="history-summary">
+            <div class="summary-card">
+                <span class="summary-label">总记录数</span>
+                <span class="summary-value" id="sumTotal">--</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">平均停留</span>
+                <span class="summary-value" id="sumAvg">--</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">最长停留</span>
+                <span class="summary-value" id="sumMax">--</span>
+            </div>
+            <div class="summary-card danger">
+                <span class="summary-label">超期离场</span>
+                <span class="summary-value" id="sumOverdue">--</span>
+            </div>
+        </div>
+
+        <!-- Table -->
+        <div class="history-table-wrap">
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th class="col-thumb">缩略图</th>
+                        <th>对象 ID</th>
+                        <th>摄像头</th>
+                        <th>时间区间（首次 → 最后）</th>
+                        <th>停留时长</th>
+                        <th>状态</th>
+                        <th class="col-action">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="histBody">
+                    <!-- rows injected -->
+                </tbody>
+            </table>
+            <div class="history-empty" id="histEmpty" style="display:none;">
+                <h3 class="empty-title">暂无历史记录</h3>
+                <p class="empty-subtitle" style="color:var(--text-2);font-size:13px;">尚未产生离场或停留事件，或当前筛选条件下没有匹配记录。</p>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="history-pager">
+            <span class="pager-info" id="pagerInfo">--</span>
+            <div class="pager-btns">
+                <button class="pager-btn" id="prevBtn" disabled>上一页</button>
+                <button class="pager-btn primary" id="nextBtn" disabled>下一页</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        "use strict";
+
+        var PAGE_SIZE = 12;
+        var allRows = [];          // every history row loaded from server
+        var filter = "all";        // all | closed | overdue
+        var search = "";
+        var page = 1;              // 1-based
+        var greenMax = 259200;     // seconds (3d) fallback
+        var yellowMax = 518400;    // seconds (6d) fallback
+
+        var body = document.getElementById("histBody");
+        var emptyEl = document.getElementById("histEmpty");
+        var pagerInfo = document.getElementById("pagerInfo");
+        var prevBtn = document.getElementById("prevBtn");
+        var nextBtn = document.getElementById("nextBtn");
+        var searchInput = document.getElementById("histSearch");
+        var chips = document.getElementById("histChips");
+
+        // ---- Helpers ----
+        function parseTs(v) {
+            if (v === null || v === undefined || v === "") return null;
+            if (typeof v === "number") {
+                // epoch seconds vs ms heuristic
+                return v > 1e11 ? new Date(v) : new Date(v * 1000);
+            }
+            var n = Date.parse(v);
+            return isNaN(n) ? null : new Date(n);
+        }
+
+        function fmtDate(d) {
+            if (!d) return "--";
+            var p = function (x) { return String(x).padStart(2, "0"); };
+            return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+        }
+
+        function fmtDuration(sec) {
+            sec = Math.floor(sec || 0);
+            if (sec <= 0) return "0m";
+            var d = Math.floor(sec / 86400);
+            var h = Math.floor((sec % 86400) / 3600);
+            var m = Math.floor((sec % 3600) / 60);
+            if (d > 0) return d + "天 " + h + "时";
+            if (h > 0) return h + "时 " + m + "分";
+            return m + "分";
+        }
+
+        function dwellClass(sec) {
+            if (sec >= yellowMax) return "red";
+            if (sec >= greenMax) return "yellow";
+            return "green";
+        }
+
+        function cameraThumbSVG() {
+            return '<span class="thum-badge">' +
+                '<svg viewBox="0 0 24 24" fill="none">' +
+                '<rect x="3" y="7" width="13" height="10" rx="2" stroke="currentColor" stroke-width="2"/>' +
+                '<path d="M16 11l5-3v8l-5-3z" fill="currentColor"/></svg></span>';
+        }
+
+        // ---- Data loading ----
+        function loadConfig() {
+            fetch("/api/config")
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (typeof d.alert_green_max === "number") greenMax = d.alert_green_max;
+                    if (typeof d.alert_yellow_max === "number") yellowMax = d.alert_yellow_max;
+                })
+                .catch(function () {});
+        }
+
+        function loadStats() {
+            fetch("/api/stats")
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    setText("sumTotal", d.total_logged != null ? d.total_logged : "--");
+                    setText("sumAvg", fmtDuration(d.avg_dwell || 0));
+                    setText("sumMax", fmtDuration(d.max_dwell || 0));
+                })
+                .catch(function () {});
+        }
+
+        function loadHistory() {
+            fetch("/api/history?limit=1000&offset=0")
+                .then(function (r) { return r.json(); })
+                .then(function (rows) {
+                    allRows = Array.isArray(rows) ? rows : [];
+                    computeOverdue();
+                    render();
+                })
+                .catch(function () {
+                    allRows = [];
+                    render();
+                });
+        }
+
+        function computeOverdue() {
+            var n = 0;
+            for (var i = 0; i < allRows.length; i++) {
+                var r = allRows[i];
+                if (r.is_active === false && (r.dwell_seconds || 0) > yellowMax) n++;
+            }
+            setText("sumOverdue", n);
+        }
+
+        function setText(id, v) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = v;
+        }
+
+        // ---- Filtering ----
+        function getFiltered() {
+            var out = [];
+            for (var i = 0; i < allRows.length; i++) {
+                var r = allRows[i];
+                var cam = "camera " + (r.camera_id + 1);
+                var idStr = String(r.track_id);
+                if (filter === "closed" && r.is_active !== false) continue;
+                if (filter === "overdue" && (r.dwell_seconds || 0) <= yellowMax) continue;
+                if (search) {
+                    var q = search.toLowerCase();
+                    if (idStr.indexOf(q) === -1 && cam.indexOf(q) === -1) continue;
+                }
+                out.push(r);
+            }
+            return out;
+        }
+
+        // ---- Rendering ----
+        function render() {
+            var rows = getFiltered();
+            var total = rows.length;
+            var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+            if (page > totalPages) page = totalPages;
+
+            body.innerHTML = "";
+            if (total === 0) {
+                emptyEl.style.display = "block";
+            } else {
+                emptyEl.style.display = "none";
+                var start = (page - 1) * PAGE_SIZE;
+                var slice = rows.slice(start, start + PAGE_SIZE);
+                for (var i = 0; i < slice.length; i++) {
+                    body.appendChild(buildRow(slice[i]));
+                }
+            }
+
+            pagerInfo.textContent = "共 " + total + " 条 · 第 " + page + " / " + totalPages + " 页";
+            prevBtn.disabled = page <= 1;
+            nextBtn.disabled = page >= totalPages;
+        }
+
+        function buildRow(r) {
+            var tr = document.createElement("tr");
+
+            var tdThumb = document.createElement("td");
+            tdThumb.className = "col-thumb";
+            tdThumb.innerHTML = cameraThumbSVG();
+
+            var tdId = document.createElement("td");
+            tdId.innerHTML = '<span class="obj-id">#' + (r.camera_id + 1) + '-' + r.track_id + '</span>';
+
+            var tdCam = document.createElement("td");
+            tdCam.textContent = "摄像头 " + (r.camera_id + 1);
+
+            var tdTime = document.createElement("td");
+            tdTime.textContent = fmtDate(parseTs(r.first_seen)) + " → " + fmtDate(parseTs(r.last_seen));
+
+            var tdDur = document.createElement("td");
+            var cls = dwellClass(r.dwell_seconds || 0);
+            tdDur.innerHTML = '<span class="dwell-val ' + cls + '">' + fmtDuration(r.dwell_seconds || 0) + '</span>';
+
+            var tdStatus = document.createElement("td");
+            if (r.is_active === true) {
+                tdStatus.innerHTML = '<span class="status-pill active">在场</span>';
+            } else {
+                tdStatus.innerHTML = '<span class="status-pill closed">已离场</span>';
+            }
+
+            var tdAction = document.createElement("td");
+            tdAction.className = "col-action";
+            tdAction.innerHTML = '<span class="row-action">查看 →</span>';
+
+            tr.appendChild(tdThumb);
+            tr.appendChild(tdId);
+            tr.appendChild(tdCam);
+            tr.appendChild(tdTime);
+            tr.appendChild(tdDur);
+            tr.appendChild(tdStatus);
+            tr.appendChild(tdAction);
+            return tr;
+        }
+
+        // ---- Events ----
+        chips.addEventListener("click", function (e) {
+            var btn = e.target.closest(".chip");
+            if (!btn) return;
+            filter = btn.dataset.filter;
+            var all = chips.querySelectorAll(".chip");
+            for (var i = 0; i < all.length; i++) all[i].classList.toggle("active", all[i] === btn);
+            page = 1;
+            render();
+        });
+
+        searchInput.addEventListener("input", function () {
+            search = searchInput.value.trim();
+            page = 1;
+            render();
+        });
+
+        prevBtn.addEventListener("click", function () {
+            if (page > 1) { page--; render(); }
+        });
+        nextBtn.addEventListener("click", function () {
+            page++; render();
+        });
+
+        // ---- Init ----
+        loadConfig();
+        loadStats();
+        loadHistory();
+    })();
+    </script>
+</body>
+</html>

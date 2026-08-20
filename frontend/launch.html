@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dwell Time Monitor · 启动</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="page">
+    <div class="launch-wrap">
+        <div class="launch-card">
+            <svg class="launch-logo" viewBox="0 0 24 24" fill="none">
+                <rect x="2" y="6" width="13" height="12" rx="2.5" stroke="#4F8CFF" stroke-width="2"/>
+                <path d="M15 10.5l6-3v9l-6-3z" fill="#4F8CFF"/>
+            </svg>
+            <div class="launch-title-block">
+                <div class="launch-title">Dwell Time Monitor</div>
+                <div class="launch-sub">实时库存滞留监控系统</div>
+            </div>
+            <div class="launch-status" id="launchStatus">服务就绪</div>
+            <div class="launch-actions">
+                <a class="btn-primary" href="index.html">进入看板 →</a>
+                <a class="launch-link" href="index.html">直接打开监控看板</a>
+            </div>
+            <div class="launch-version">v0.2 · 本地部署</div>
+        </div>
+    </div>
+    <script>
+        // Best-effort: show how many cameras are already configured.
+        fetch("/api/cameras")
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var el = document.getElementById("launchStatus");
+                if (Array.isArray(d)) {
+                    el.textContent = "服务就绪 · 已配置 " + d.length + " 路摄像头";
+                }
+            })
+            .catch(function () {});
+    </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# Python 运行产物
+__pycache__/
+*.pyc
+.venv-macos-build/
+.venv/
+
+# 本地构建输出 (保留 dist/macos 下的三个构建脚本)
+dist/*
+!dist/macos/
+dist/macos/*
+!dist/macos/build_macos.sh
+!dist/macos/dwell_monitor_macos.spec
+!dist/macos/README.txt
+work/
+
+# 运行时数据与本地配置 (含摄像头地址, 不入库)
+backend/cameras.json
+*.db
+outputs/
+
+# 推理只用 onnx, .pt 权重不分发
+backend/yolov8n.pt

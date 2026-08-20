@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dwell Time Monitor · 实时库存滞留监控</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <svg class="brand-logo" viewBox="0 0 24 24" fill="none">
+                <rect x="2" y="6" width="13" height="12" rx="2.5" stroke="#4F8CFF" stroke-width="2"/>
+                <path d="M15 10.5l6-3v9l-6-3z" fill="#4F8CFF"/>
+            </svg>
+            <div class="brand-text">
+                <h1>Dwell Time Monitor</h1>
+                <span class="brand-sub">实时库存滞留监控系统</span>
+            </div>
+        </div>
+        <div class="status-bar">
+            <span class="connection-status" id="connectionStatus">Disconnected</span>
+            <span class="object-count" id="objectCount">0 objects tracked</span>
+            <a class="nav-btn" href="history.html" title="历史记录">历史记录</a>
+            <button class="settings-btn" id="settingsBtn" title="Settings">⚙ 设置</button>
+        </div>
+    </header>
+
+    <!-- KPI Bar -->
+    <section class="kpi-bar" id="kpiBar">
+        <div class="kpi-card">
+            <span class="kpi-label">摄像头</span>
+            <span class="kpi-value" id="kpiCameras">0</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">跟踪对象</span>
+            <span class="kpi-value" id="kpiTracked">0</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">平均停留</span>
+            <span class="kpi-value" id="kpiAvg">N/A</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">最长停留</span>
+            <span class="kpi-value" id="kpiMax">N/A</span>
+        </div>
+        <div class="kpi-card alert">
+            <span class="kpi-label">告警</span>
+            <span class="kpi-value" id="kpiAlerts">0</span>
+        </div>
+    </section>
+
+    <main class="app-main">
+        <!-- Left: Live Video Feed -->
+        <section class="video-section">
+            <!-- Camera tabs + view mode toggle -->
+            <div class="camera-tabs" id="cameraTabs">
+                <!-- Dynamically populated -->
+            </div>
+            <div class="video-container" id="videoContainer">
+                <img id="videoFeed" src="/video_feed/0" alt="Live Video Feed">
+                <div class="video-overlay" id="videoOverlay">
+                    <span>Connecting to camera...</span>
+                </div>
+            </div>
+            <div class="video-info" id="videoInfo">
+                <span class="fps-indicator" id="fpsIndicator">Waiting for stream...</span>
+                <button class="view-mode-btn" id="viewModeBtn" title="Toggle split view">⊞ 分屏</button>
+            </div>
+        </section>
+
+        <!-- Right: Tracked Objects Panel -->
+        <aside class="objects-panel">
+            <div class="panel-header">
+                <h2>跟踪对象</h2>
+                <div class="legend">
+                    <span class="legend-item"><span class="dot green"></span> <span>&lt; 3d</span></span>
+                    <span class="legend-item"><span class="dot yellow"></span> <span>3-6d</span></span>
+                    <span class="legend-item"><span class="dot red"></span> <span>&gt; 6d</span></span>
+                </div>
+            </div>
+            <!-- Camera filter tabs for object list -->
+            <div class="camera-filter-tabs" id="cameraFilterTabs">
+                <!-- Dynamically populated -->
+            </div>
+            <div class="objects-grid" id="objectsGrid">
+                <div class="empty-state" id="emptyState">
+                    <svg class="empty-illustration" viewBox="0 0 120 120" fill="none">
+                        <rect x="16" y="34" width="56" height="48" rx="8" stroke="#2A3142" stroke-width="3"/>
+                        <path d="M72 48 L96 38 L96 82 L72 72 Z" stroke="#2A3142" stroke-width="3" stroke-linejoin="round"/>
+                        <circle cx="44" cy="58" r="11" stroke="#4F8CFF" stroke-width="3"/>
+                    </svg>
+                    <span class="empty-eyebrow">未开始监控</span>
+                    <h3 class="empty-title">暂无监控数据</h3>
+                    <p class="empty-subtitle">当前没有已配置的摄像头，或所有画面中尚未检测到滞留对象。添加摄像头后即可开始实时监测。</p>
+                    <div class="empty-actions">
+                        <button class="btn-primary" id="emptyAddCamera">+ 添加摄像头</button>
+                        <a class="btn-link" href="launch.html">查看使用文档 →</a>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Footer: slim status bar -->
+    <footer class="app-footer">
+        <span class="foot-brand">Dwell Time Monitor · 实时库存滞留监控系统</span>
+        <span class="foot-right">
+            <span class="foot-dot" id="footDot"></span>
+            <span id="footStatusText">Disconnected</span>
+            <span class="foot-sep">·</span>
+            <span id="footClock">--:--:--</span>
+        </span>
+    </footer>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay hidden" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>设置</h2>
+                <button class="modal-close" id="settingsClose" title="Close">×</button>
+            </div>
+            <div class="modal-body">
+                <section class="settings-section">
+                    <h3>摄像头管理</h3>
+                    <div class="camera-list" id="cameraList">
+                        <p class="camera-list-empty">尚未配置摄像头。</p>
+                    </div>
+                    <div class="form-row">
+                        <label class="field grow">
+                            <span class="field-label">摄像头源</span>
+                            <input type="text" id="cameraSourceInput"
+                                   placeholder="RTSP 地址或摄像头索引（如 0）"
+                                   autocomplete="off">
+                        </label>
+                        <button class="modal-btn primary" id="cameraAddBtn">添加摄像头</button>
+                    </div>
+                    <p class="modal-hint">
+                        示例：<code>0</code>（本地摄像头），
+                        <code>rtsp://user:pass@192.168.1.100:554/stream</code>
+                    </p>
+                </section>
+
+                <section class="settings-section">
+                    <h3>局域网摄像头扫描</h3>
+                    <div class="form-row">
+                        <label class="field grow">
+                            <span class="field-label">IP 范围</span>
+                            <input type="text" id="scanTargetInput"
+                                   placeholder="留空 = 自动探测局域网"
+                                   autocomplete="off">
+                        </label>
+                        <label class="field fixed-160">
+                            <span class="field-label">端口</span>
+                            <input type="text" id="scanPortsInput"
+                                   placeholder="留空 = 自动"
+                                   autocomplete="off">
+                        </label>
+                        <button class="modal-btn primary" id="scanStartBtn">扫描</button>
+                    </div>
+                    <div class="form-row">
+                        <label class="field grow">
+                            <span class="field-label">用户名</span>
+                            <input type="text" id="scanUsernameInput"
+                                   placeholder="留空 = 尝试默认凭据"
+                                   autocomplete="off">
+                        </label>
+                        <label class="field grow">
+                            <span class="field-label">密码</span>
+                            <input type="password" id="scanPasswordInput"
+                                   placeholder="留空 = 尝试默认"
+                                   autocomplete="new-password">
+                        </label>
+                    </div>
+                    <p class="modal-hint">
+                        所有字段均可选 —— 直接点击 <strong>扫描</strong> 即可自动探测本地局域网，
+                        并对 100 个常见 RTSP 端口使用常见默认凭据与码流路径进行探测。仅填写用户名与密码也可：
+                        扫描器将用这对凭据扫描整个局域网。需要缩小范围时，可填写 CIDR（<code>192.168.1.0/24</code>）、
+                        区间（<code>192.168.1.10-50</code>）、单个 IP 或自定义端口列表。可用地址将显示在下方的服务端控制台中。
+                    </p>
+                    <div class="scan-progress hidden" id="scanProgress">
+                        <div class="scan-progress-bar">
+                            <div class="scan-progress-fill" id="scanProgressFill"></div>
+                        </div>
+                        <div class="scan-progress-text" id="scanProgressText">Idle</div>
+                    </div>
+                    <div class="scan-results" id="scanResults"></div>
+                    <div class="scan-log hidden" id="scanLog"></div>
+                </section>
+
+                <section class="settings-section">
+                    <h3>告警阈值</h3>
+                    <div class="form-row">
+                        <label class="field fixed-160">
+                            <span class="field-label">绿色 &lt;（小时）</span>
+                            <input type="number" id="greenMaxInput" min="0.1" step="0.1" placeholder="72">
+                        </label>
+                        <label class="field fixed-160">
+                            <span class="field-label">黄色 &lt;（小时）</span>
+                            <input type="number" id="yellowMaxInput" min="0.1" step="0.1" placeholder="144">
+                        </label>
+                        <button class="modal-btn primary" id="thresholdApplyBtn">应用</button>
+                    </div>
+                    <p class="modal-hint">
+                        单位：<strong>小时</strong>。默认：绿色 72 小时（3 天），黄色 144 小时（6 天）。
+                        低于绿色 = 正常，绿色到黄色 = 关注，高于黄色 = 告警。
+                    </p>
+                </section>
+
+                <div class="settings-status" id="settingsStatus"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
